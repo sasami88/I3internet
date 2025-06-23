@@ -168,10 +168,10 @@ static void *receive_video(void*)
     AVFrame  *yuv  = av_frame_alloc();
     AVFrame  *bgr  = av_frame_alloc();               // RGB/BGR 変換用
 
-    const int W = 640, H = 480;
+    const int W = 640, H = 360; // 解像度を一致させる
     dec_sws = sws_getContext(W, H, AV_PIX_FMT_YUV420P,
                              W, H, AV_PIX_FMT_BGR24,
-                             SWS_FAST_BILINEAR,nullptr,nullptr,nullptr);
+                             SWS_FAST_BILINEAR, nullptr, nullptr, nullptr);
 
     /* BGR フレーム用バッファ確保 */
     bgr->format = AV_PIX_FMT_BGR24;
@@ -202,8 +202,9 @@ static void *receive_video(void*)
         if (avcodec_send_packet(dec_ctx, pkt) < 0) continue;
         while (avcodec_receive_frame(dec_ctx, yuv) == 0) {
             /* 5) YUV420P → BGR */
+            memset(bgr->data[0], 0, bgr->linesize[0] * bgr->height); // フレームをゼロクリア
             sws_scale(dec_sws,
-                      yuv->data, yuv->linesize, 0, H,
+                      yuv->data, yuv->linesize, 0, dec_ctx->height,
                       bgr->data, bgr->linesize);
 
             /* 6) BGR → GdkPixbuf (RGB 順) */
