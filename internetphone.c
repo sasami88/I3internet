@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "ffmpeg_video.h"
 
 // ──────────────────────────────────────────────────
 //   Forward‑declared networking helpers
@@ -236,6 +237,16 @@ static void run_client(const char *ip, const char *port) {
 
     if (rec_stream) { pclose(rec_stream); rec_stream = NULL; }
     if (client_socket_fd >= 0) { close(client_socket_fd); client_socket_fd = -1; }
+}
+
+// 映像送信スレッド
+void *send_video(void *arg) {
+    // FFmpegの初期化とエンコード処理を呼び出す
+}
+
+// 映像受信スレッド
+void *receive_video(void *arg) {
+    // FFmpegの初期化とデコード処理を呼び出す
 }
 
 // ──────────────────────────────────────────────────

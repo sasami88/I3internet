@@ -114,21 +114,35 @@ static void set_rt(int prio){
 //───────────────────────
 // VIDEO threads
 //───────────────────────
-static void* thread_v_cap(void*){
+static void* thread_v_cap(void*) {
     set_rt(4);
     cv::VideoCapture cap(0);
-    if(!cap.isOpened()) return NULL;
-    cap.set(cv::CAP_PROP_FRAME_WIDTH,VIDEO_W);
-    cap.set(cv::CAP_PROP_FRAME_HEIGHT,VIDEO_H);
-    cv::Mat frame; std::vector<uchar> buf;
-    auto period=std::chrono::milliseconds(1000/VIDEO_FPS);
-    while(app.running){
-        auto t0=std::chrono::steady_clock::now();
-        cap>>frame; if(frame.empty()) continue;
-        cv::imencode(".jpg",frame,buf,{cv::IMWRITE_JPEG_QUALITY,JPEG_QUALITY});
-        char* p=(char*)malloc(buf.size()); memcpy(p,buf.data(),buf.size());
-        if(!rb_v_tx.push(p,buf.size())) free(p); // drop if full
-        std::this_thread::sleep_until(t0+period);
+    if (!cap.isOpened()) return NULL;
+
+    // 解像度を下げる
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, 360);
+
+    cv::Mat frame;
+    std::vector<uchar> buf;
+    auto period = std::chrono::milliseconds(1000 / 30); // 約30fps
+
+    while (app.running) {
+        auto t0 = std::chrono::steady_clock::now();
+        cap >> frame;
+        if (frame.empty()) continue;
+
+        // BGRからRGBに変換
+        cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
+
+        // JPEG品質を下げる
+        cv::imencode(".jpg", frame, buf, {cv::IMWRITE_JPEG_QUALITY, 50});
+
+        char* p = (char*)malloc(buf.size());
+        memcpy(p, buf.data(), buf.size());
+        if (!rb_v_tx.push(p, buf.size())) free(p); // バッファがいっぱいの場合は破棄
+
+        std::this_thread::sleep_until(t0 + period); // 次のフレームまで待機
     }
     return NULL;
 }
@@ -137,13 +151,32 @@ static bool send_full(int sock,const char*data,size_t len){
     size_t sent=0; while(sent<len){ssize_t n=send(sock,data+sent,len-sent,0); if(n<=0){if(errno==EAGAIN||errno==EWOULDBLOCK){std::this_thread::sleep_for(std::chrono::milliseconds(2));continue;} return false;} sent+=n;} return true;}
 
 
-static void* thread_v_tx(void*arg){int sock=*(int*)arg; set_rt(3);
-    set_tcp_nodelay(sock);
-    while(app.running){
-        char* p; uint32_t l;
-        if(!rb_v_tx.pop(p,l)){std::this_thread::sleep_for(std::chrono::milliseconds(2));continue;}
-        uint32_t ln=htonl(l);
-        if(!send_full(sock,(char*)&ln,4) || !send_full(sock,p,l)){free(p);break;}
+static void* thread_v_tx(void* arg) {
+    int sock = *(int*)arg;
+    set_rt(3);
+
+    // Nagleアルゴリズムを無効化
+    int one = 1;
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+
+    // TCPバッファサイズを縮小
+    int buf_size = 16 * 1024; // 16KB
+    setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
+    setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
+
+    while (app.running) {
+        char* p;
+        uint32_t l;
+        if (!rb_v_tx.pop(p, l)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            continue;
+        }
+
+        uint32_t ln = htonl(l);
+        if (!send_full(sock, (char*)&ln, 4) || !send_full(sock, p, l)) {
+            free(p);
+            break;
+        }
         free(p);
     }
     return NULL;
