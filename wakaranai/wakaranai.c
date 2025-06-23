@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <opencv2/opencv.hpp>
+#include <thread>         // std::this_thread::sleep_for 用
+#include <netinet/tcp.h>  // TCP_NODELAY 用
 
 /*──────────────────────
   CONFIGURATION
@@ -116,9 +118,13 @@ static int open_connect(const char* ip, int port){
     inet_pton(AF_INET, ip, &a.sin_addr);
     connect(s, (struct sockaddr*)&a, sizeof(a));
 
-    // Nagleアルゴリズムを無効化
     int one = 1;
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+
+    // TCPバッファサイズを縮小
+    int buf_size = 16 * 1024; // 16KB
+    setsockopt(s, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
+    setsockopt(s, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
 
     return s;
 }
@@ -130,15 +136,15 @@ static int open_listen(int port){
     a.sin_port = htons(port);
     a.sin_addr.s_addr = INADDR_ANY;
     bind(s, (struct sockaddr*)&a, sizeof(a));
-    listen(s, 1);
+    listen(s, 5);
 
-    // Nagleアルゴリズムを無効化
-    int one = 1;
-    setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    // TCPバッファサイズを縮小
+    int buf_size = 16 * 1024; // 16KB
+    setsockopt(s, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
+    setsockopt(s, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
 
     return s;
 }
-
 static void run_server(const char *port){int p=atoi(port);
     srv_sock_audio=open_listen(p);
     srv_sock_video=open_listen(p+1);
