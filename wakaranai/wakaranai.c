@@ -108,8 +108,36 @@ static void *receive_audio(void*){
 /*──────────────────────
   NETWORK server/client
 ──────────────────────*/
-static int open_listen(int port){int s=socket(AF_INET,SOCK_STREAM,0); struct sockaddr_in a={0}; a.sin_family=AF_INET;a.sin_port=htons(port);a.sin_addr.s_addr=INADDR_ANY; bind(s,(struct sockaddr*)&a,sizeof(a)); listen(s,1); return s;}
-static int open_connect(const char*ip,int port){int s=socket(AF_INET,SOCK_STREAM,0); struct sockaddr_in a={0}; a.sin_family=AF_INET;a.sin_port=htons(port); inet_pton(AF_INET,ip,&a.sin_addr); connect(s,(struct sockaddr*)&a,sizeof(a)); return s;}
+static int open_connect(const char* ip, int port){
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in a = {0};
+    a.sin_family = AF_INET;
+    a.sin_port = htons(port);
+    inet_pton(AF_INET, ip, &a.sin_addr);
+    connect(s, (struct sockaddr*)&a, sizeof(a));
+
+    // Nagleアルゴリズムを無効化
+    int one = 1;
+    setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+
+    return s;
+}
+
+static int open_listen(int port){
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in a = {0};
+    a.sin_family = AF_INET;
+    a.sin_port = htons(port);
+    a.sin_addr.s_addr = INADDR_ANY;
+    bind(s, (struct sockaddr*)&a, sizeof(a));
+    listen(s, 1);
+
+    // Nagleアルゴリズムを無効化
+    int one = 1;
+    setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+
+    return s;
+}
 
 static void run_server(const char *port){int p=atoi(port);
     srv_sock_audio=open_listen(p);
