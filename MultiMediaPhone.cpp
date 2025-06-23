@@ -234,38 +234,9 @@ static void *send_audio(void*){
     while((n=fread(b,1,sizeof(b),rec_stream))>0){ if(cli_sock_audio<0)break; if(send(cli_sock_audio,b,n,0)<=0)break; }
     return NULL;
 }
-
-// フィルタモードのグローバル変数
-static std::atomic<bool> filter_mode_enabled{false};
-
-// フィルタモードを切り替える関数
-static void toggle_filter_mode(GtkButton* button, gpointer user_data) {
-    filter_mode_enabled = !filter_mode_enabled;
-    const char* status = filter_mode_enabled ? "Filter Mode: ON" : "Filter Mode: OFF";
-    gtk_button_set_label(button, status);
-}
-
-// 音声受信処理（フィルタモード対応）
-static void* receive_audio(void*) {
-    char buffer[4096];
-    ssize_t n;
-    FILE* play;
-
-    if (filter_mode_enabled) {
-        // フィルタモードが有効な場合、周波数を倍増して再生
-        play = popen("play -t raw -b 16 -c 1 -e s -r 44100 - synth 0.0 sin 880 vol 0.5", "w");
-    } else {
-        // 通常モード
-        play = popen("play -t raw -b 16 -c 1 -e s -r 44100 -", "w");
-    }
-
-    while (cli_sock_audio >= 0 && (n = recv(cli_sock_audio, buffer, sizeof(buffer), 0)) > 0) {
-        fwrite(buffer, 1, n, play);
-    }
-
-    pclose(play);
-    return NULL;
-}
+static void *receive_audio(void*){
+    char b[4096]; ssize_t n; FILE* play=popen("play -t raw -b 16 -c 1 -e s -r 44100 -","w");
+    while(cli_sock_audio>=0 && (n=recv(cli_sock_audio,b,sizeof(b),0))>0){ fwrite(b,1,n,play);} pclose(play); return NULL; }
 
 /*──────────────────────
   NETWORK server/client
@@ -435,6 +406,11 @@ static GtkWidget* build_ui() {
     gtk_window_set_title(GTK_WINDOW(win), "AV Chat");
     gtk_window_set_default_size(GTK_WINDOW(win), 600, 400);
 
+    // アイコンを設定
+    if (!gtk_window_set_icon_from_file(GTK_WINDOW(win), "./output.png", NULL)) {
+        fprintf(stderr, "Failed to load icon: icon.png\n");
+    }
+
     GtkWidget* grid = gtk_grid_new();
     gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
     gtk_container_set_border_width(GTK_CONTAINER(grid), 15);
@@ -447,11 +423,6 @@ static GtkWidget* build_ui() {
     app.radio_server = radio_srv;
     gtk_grid_attach(GTK_GRID(grid), radio_srv, 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), radio_cli, 1, 0, 1, 1);
-
-    // フィルタモード切り替えボタン
-    GtkWidget* btn_filter = gtk_button_new_with_label("Filter Mode: OFF");
-    g_signal_connect(btn_filter, "clicked", G_CALLBACK(toggle_filter_mode), NULL);
-    gtk_grid_attach(GTK_GRID(grid), btn_filter, 0, 1, 2, 1); // 別の行に配置
 
     // IPとポート入力
     GtkWidget* lbl_ip = gtk_label_new("🔗 IP Address:");
@@ -470,27 +441,27 @@ static GtkWidget* build_ui() {
     // ポート番号入力欄に変更イベントを追加
     g_signal_connect(entry_port, "changed", G_CALLBACK(on_port_entry_changed), NULL);
 
-    gtk_grid_attach(GTK_GRID(grid), lbl_ip, 0, 2, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), entry_ip, 1, 2, 2, 1);
-    gtk_grid_attach(GTK_GRID(grid), lbl_port, 0, 3, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), entry_port, 1, 3, 2, 1);
+    gtk_grid_attach(GTK_GRID(grid), lbl_ip, 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entry_ip, 1, 1, 2, 1);
+    gtk_grid_attach(GTK_GRID(grid), lbl_port, 0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entry_port, 1, 2, 2, 1);
 
     // スタート/ストップボタン
     GtkWidget* btn_start = gtk_button_new_with_label("▶️ Start");
     GtkWidget* btn_stop = gtk_button_new_with_label("⏹️ Stop");
-    gtk_grid_attach(GTK_GRID(grid), btn_start, 0, 4, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), btn_stop, 1, 4, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), btn_start, 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), btn_stop, 1, 3, 1, 1);
 
     // ステータス表示
     GtkWidget* lbl_status = gtk_label_new("🟢 Status: Idle");
     app.label_status = lbl_status;
-    gtk_grid_attach(GTK_GRID(grid), lbl_status, 0, 5, 3, 1);
+    gtk_grid_attach(GTK_GRID(grid), lbl_status, 0, 4, 3, 1);
 
     // ピア動画表示
     GtkWidget* image_peer = gtk_image_new_from_icon_name("camera-web", GTK_ICON_SIZE_DIALOG);
     app.image_peer = image_peer;
-    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("📹 Peer Video:"), 0, 6, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), image_peer, 1, 6, 2, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("📹 Peer Video:"), 0, 5, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), image_peer, 1, 5, 2, 1);
 
     // サーバー/クライアント切り替え時の動作を追加
     g_signal_connect(radio_srv, "toggled", G_CALLBACK(+[](GtkToggleButton *btn, gpointer data) {
