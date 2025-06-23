@@ -77,6 +77,7 @@ typedef struct {
     GtkWidget *radio_server;
     GtkWidget *label_status;
     GtkWidget *image_peer;
+    GtkWidget *main_window; // メインウィンドウを追加
     pthread_t  worker;
     gboolean   running;
 } App;
@@ -267,35 +268,137 @@ static void run_client(const char *ip,const char *port){int p=atoi(port);
     pthread_join(ta,NULL); pthread_join(tr,NULL); pthread_join(tv_send,NULL); pthread_join(tv_recv,NULL);
 }
 
-/*──────────────────────
-  GTK UI
-──────────────────────*/
-static GtkWidget* build_ui(){
-    GtkWidget* win=gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(win),"AV Chat (GTK)"); gtk_window_set_default_size(GTK_WINDOW(win),480,360);
-    GtkWidget* grid=gtk_grid_new(); gtk_grid_set_row_spacing(GTK_GRID(grid),6); gtk_container_set_border_width(GTK_CONTAINER(grid),12);
-    gtk_container_add(GTK_CONTAINER(win),grid);
-    GtkWidget* radio_srv=gtk_radio_button_new_with_label(NULL,"Server"); GtkWidget* radio_cli=gtk_radio_button_new_with_label_from_widget(GTK_RADIO_BUTTON(radio_srv),"Client");
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio_srv),TRUE); app.radio_server=radio_srv;
-    gtk_grid_attach(GTK_GRID(grid),radio_srv,0,0,1,1); gtk_grid_attach(GTK_GRID(grid),radio_cli,1,0,1,1);
+// 起動画面を表示する関数
+static gboolean splash_timeout_cb(gpointer data) {
+    GtkWidget* splash_window = GTK_WIDGET(data);
+    gtk_widget_destroy(splash_window); // 起動画面を閉じる
+    gtk_widget_show_all(GTK_WIDGET(app.main_window)); // メインウィンドウを表示
+    return FALSE;
+}
 
-    GtkWidget* lbl_ip=gtk_label_new("IP:"); GtkWidget* entry_ip=gtk_entry_new(); gtk_entry_set_placeholder_text(GTK_ENTRY(entry_ip),"127.0.0.1"); app.entry_ip=entry_ip;
-    GtkWidget* lbl_port=gtk_label_new("Port:"); GtkWidget* entry_port=gtk_entry_new(); gtk_entry_set_placeholder_text(GTK_ENTRY(entry_port),"5555"); app.entry_port=entry_port;
-    gtk_grid_attach(GTK_GRID(grid),lbl_ip,0,1,1,1); gtk_grid_attach(GTK_GRID(grid),entry_ip,1,1,2,1);
-    gtk_grid_attach(GTK_GRID(grid),lbl_port,0,2,1,1); gtk_grid_attach(GTK_GRID(grid),entry_port,1,2,2,1);
+static void show_splash_screen(GtkWidget* main_window) {
+    GtkWidget* splash_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(splash_window), "AV Chat - Loading...");
+    gtk_window_set_default_size(GTK_WINDOW(splash_window), 600, 400);
 
-    GtkWidget* btn_start=gtk_button_new_with_label("Start"); GtkWidget* btn_stop=gtk_button_new_with_label("Stop");
-    gtk_grid_attach(GTK_GRID(grid),btn_start,0,3,1,1); gtk_grid_attach(GTK_GRID(grid),btn_stop,1,3,1,1);
+    // CSSプロバイダを作成して背景画像を設定
+    GtkCssProvider* css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css_provider,
+        "window {"
+        "  background-image: url('背景.jpg');"
+        "  background-size: cover;"
+        "  background-repeat: no-repeat;"
+        "}", -1, NULL);
 
-    GtkWidget* lbl=gtk_label_new("idle"); app.label_status=lbl; gtk_grid_attach(GTK_GRID(grid),lbl,0,4,3,1);
+    GtkStyleContext* style_context = gtk_widget_get_style_context(splash_window);
+    gtk_style_context_add_provider(style_context, GTK_STYLE_PROVIDER(css_provider), GTK_STYLE_PROVIDER_PRIORITY_USER);
 
-    GtkWidget* image_peer=gtk_image_new_from_icon_name("camera-web",GTK_ICON_SIZE_DIALOG); app.image_peer=image_peer;
-    gtk_grid_attach(GTK_GRID(grid),gtk_label_new("Peer video:"),0,5,1,1); gtk_grid_attach(GTK_GRID(grid),image_peer,1,5,2,1);
+    gtk_widget_show_all(splash_window);
 
-    g_signal_connect(btn_start,"clicked",G_CALLBACK(+[](GtkButton*,gpointer){ if(app.running)return; const char*port=gtk_entry_get_text(GTK_ENTRY(app.entry_port)); if(strlen(port)==0){set_status("port?");return;} app.running=TRUE; pthread_create(&app.worker,NULL,+[](void*)->void*{ gboolean is_srv=gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(app.radio_server)); const char*ip=gtk_entry_get_text(GTK_ENTRY(app.entry_ip)); const char*port=gtk_entry_get_text(GTK_ENTRY(app.entry_port)); if(is_srv){set_status("server waiting…"); run_server(port);} else {set_status("client connecting…"); run_client(ip,port);} set_status("finished"); app.running=FALSE; return NULL;},NULL); }),NULL);
-    g_signal_connect(btn_stop,"clicked",G_CALLBACK(+[](GtkButton*,gpointer){ if(!app.running)return; if(cli_sock_audio>0){shutdown(cli_sock_audio,SHUT_RDWR);close(cli_sock_audio);cli_sock_audio=-1;} if(cli_sock_video>0){shutdown(cli_sock_video,SHUT_RDWR);close(cli_sock_video);cli_sock_video=-1;} if(srv_sock_audio>0){close(srv_sock_audio);srv_sock_audio=-1;} if(srv_sock_video>0){close(srv_sock_video);srv_sock_video=-1;} if(rec_stream){pclose(rec_stream);rec_stream=NULL;} pthread_join(app.worker,NULL); app.running=FALSE; set_status("stopped"); }),NULL);
+    // 一定時間後にメインウィンドウを表示
+    app.main_window = main_window; // グローバル変数に保存
+    g_timeout_add(3000, splash_timeout_cb, splash_window);
+}
+
+// メインUIを構築する関数
+static GtkWidget* build_ui() {
+    GtkWidget* win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(win), "AV Chat - TCP Comm");
+    gtk_window_set_default_size(GTK_WINDOW(win), 600, 400);
+
+    GtkWidget* grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(grid), 15);
+    gtk_container_add(GTK_CONTAINER(win), grid);
+
+    // モード選択
+    GtkWidget* radio_srv = gtk_radio_button_new_with_label(NULL, "🌐 Server Mode");
+    GtkWidget* radio_cli = gtk_radio_button_new_with_label_from_widget(GTK_RADIO_BUTTON(radio_srv), "📡 Client Mode");
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio_cli), TRUE); // デフォルトでクライアントモード
+    app.radio_server = radio_srv;
+    gtk_grid_attach(GTK_GRID(grid), radio_srv, 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), radio_cli, 1, 0, 1, 1);
+
+    // IPとポート入力
+    GtkWidget* lbl_ip = gtk_label_new("🔗 IP Address:");
+    GtkWidget* entry_ip = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_ip), "127.0.0.1");
+    app.entry_ip = entry_ip;
+    GtkWidget* lbl_port = gtk_label_new("🔌 Port:");
+    GtkWidget* entry_port = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_port), "5555");
+    app.entry_port = entry_port;
+
+    gtk_grid_attach(GTK_GRID(grid), lbl_ip, 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entry_ip, 1, 1, 2, 1);
+    gtk_grid_attach(GTK_GRID(grid), lbl_port, 0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entry_port, 1, 2, 2, 1);
+
+    // スタート/ストップボタン
+    GtkWidget* btn_start = gtk_button_new_with_label("▶️ Start");
+    GtkWidget* btn_stop = gtk_button_new_with_label("⏹️ Stop");
+    gtk_grid_attach(GTK_GRID(grid), btn_start, 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), btn_stop, 1, 3, 1, 1);
+
+    // ステータス表示
+    GtkWidget* lbl_status = gtk_label_new("🟢 Status: Idle");
+    app.label_status = lbl_status;
+    gtk_grid_attach(GTK_GRID(grid), lbl_status, 0, 4, 3, 1);
+
+    // ピア動画表示
+    GtkWidget* image_peer = gtk_image_new_from_icon_name("camera-web", GTK_ICON_SIZE_DIALOG);
+    app.image_peer = image_peer;
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("📹 Peer Video:"), 0, 5, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), image_peer, 1, 5, 2, 1);
+
+    // サーバー/クライアント切り替え時の動作を追加
+    g_signal_connect(radio_srv, "toggled", G_CALLBACK(+[](GtkToggleButton *btn, gpointer data) {
+        gboolean active = gtk_toggle_button_get_active(btn);
+        gtk_widget_set_visible(app.entry_ip, !active); // サーバーの場合はIP入力欄を非表示
+        gtk_widget_set_visible(GTK_WIDGET(data), !active); // サーバーの場合はIPラベルを非表示
+    }), lbl_ip);
+
+    g_signal_connect(btn_start, "clicked", G_CALLBACK(+[](GtkButton*, gpointer) {
+        if (app.running) return;
+        const char* port = gtk_entry_get_text(GTK_ENTRY(app.entry_port));
+        if (strlen(port) == 0) { set_status("🔴 Error: Port required"); return; }
+        app.running = TRUE;
+        pthread_create(&app.worker, NULL, +[](void*) -> void* {
+            gboolean is_srv = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(app.radio_server));
+            const char* ip = gtk_entry_get_text(GTK_ENTRY(app.entry_ip));
+            const char* port = gtk_entry_get_text(GTK_ENTRY(app.entry_port));
+            if (is_srv) { set_status("🟡 Server: Waiting for connection..."); run_server(port); }
+            else { set_status("🟡 Client: Connecting to server..."); run_client(ip, port); }
+            set_status("🟢 Finished");
+            app.running = FALSE;
+            return NULL;
+        }, NULL);
+    }), NULL);
+
+    g_signal_connect(btn_stop, "clicked", G_CALLBACK(+[](GtkButton*, gpointer) {
+        if (!app.running) return;
+        if (cli_sock_audio > 0) { shutdown(cli_sock_audio, SHUT_RDWR); close(cli_sock_audio); cli_sock_audio = -1; }
+        if (cli_sock_video > 0) { shutdown(cli_sock_video, SHUT_RDWR); close(cli_sock_video); cli_sock_video = -1; }
+        if (srv_sock_audio > 0) { close(srv_sock_audio); srv_sock_audio = -1; }
+        if (srv_sock_video > 0) { close(srv_sock_video); srv_sock_video = -1; }
+        if (rec_stream) { pclose(rec_stream); rec_stream = NULL; }
+        pthread_join(app.worker, NULL);
+        app.running = FALSE;
+        set_status("🟢 Stopped");
+    }), NULL);
 
     return win;
 }
 
-int main(int argc,char**argv){ gtk_init(&argc,&argv); GtkWidget*win=build_ui(); g_signal_connect(win,"destroy",G_CALLBACK(gtk_main_quit),NULL); gtk_widget_show_all(win); gtk_main(); return 0; }
+int main(int argc, char** argv) {
+    gtk_init(&argc, &argv);
+
+    GtkWidget* main_window = build_ui();
+    g_signal_connect(main_window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+
+    // 起動画面を表示
+    show_splash_screen(main_window);
+
+    gtk_main();
+    return 0;
+}
